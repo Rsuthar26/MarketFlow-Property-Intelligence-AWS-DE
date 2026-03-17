@@ -23,3 +23,20 @@ jobs:
 
       - name: Verify AWS connection
         run: aws sts get-caller-identity
+
+      - name: Sync data files to S3
+        run: |
+          for source in cbre-living cushman-wakefield foxtons hamptons jll-residential knight-frank purple-bricks right-move savills strutt-parker; do
+            if [ -d "data/$source" ]; then
+              aws s3 sync data/$source/ s3://marketflow-property-intelligence-data/$source/raw-data/ \
+                --exclude "*" \
+                --include "*.csv" \
+                --include "*.json" \
+                --include "*.parquet" \
+                --include "*.xlsx" \
+                --delete
+              echo "✓ Synced $source to S3"
+            else
+              echo "⚠ Skipped $source — folder not found in repo"
+            fi
+          done
