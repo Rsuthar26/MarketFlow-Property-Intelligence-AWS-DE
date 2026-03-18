@@ -74,6 +74,7 @@ jobs:
       - name: Sync data files to S3
         run: |
           echo "Deploying to ${{ env.ENVIRONMENT }} environment"
+          DATA_CHANGED=false
           for source in cbre-living cushman-wakefield foxtons hamptons \
             jll-residential knight-frank purple-bricks right-move \
             savills strutt-parker; do
@@ -88,10 +89,12 @@ jobs:
                 --delete \
                 --metadata environment=${{ env.ENVIRONMENT }}
               echo "Synced $source to S3 [${{ env.ENVIRONMENT }}]"
+              DATA_CHANGED=true
             else
               echo "Skipped $source -- no data folder found"
             fi
           done
+          echo "DATA_CHANGED=$DATA_CHANGED" >> $GITHUB_ENV
 
       # ── Step 2: Upload Glue scripts to S3 ─────────────────────
       - name: Upload Glue scripts to S3
@@ -133,7 +136,19 @@ jobs:
             }'
           echo "Glue Data Quality job updated with latest script"
 
-      # ── Step 4: Deployment summary ─────────────────────────────
+      # ── Step 4: Trigger Step Functions pipeline ────────────────
+      # Runs AFTER all files are synced -- one single execution
+      # This avoids concurrent run issues from multiple S3 events
+      - name: Trigger MarketFlow Pipeline
+        run: |
+          EXECUTION_NAME="github-$(date +%Y%m%d%H%M%S)-${{ github.run_number }}"
+          aws stepfunctions start-execution \
+            --state-machine-arn arn:aws:states:eu-north-1:467091806172:stateMachine:marketflow-pipeline-dag \
+            --name "$EXECUTION_NAME"
+          echo "Pipeline triggered: $EXECUTION_NAME"
+          echo "Monitor at: https://eu-north-1.console.aws.amazon.com/states/home?region=eu-north-1#/statemachines/view/arn:aws:states:eu-north-1:467091806172:stateMachine:marketflow-pipeline-dag"
+
+      # ── Step 5: Deployment summary ─────────────────────────────
       - name: Deployment summary
         run: |
           echo "================================================"
@@ -143,4 +158,5 @@ jobs:
           echo "ETL script  -- s3://.../glue-scripts/etl_job.py"
           echo "DQ script   -- s3://.../glue-scripts/data_quality_check.py"
           echo "Glue jobs   -- updated with latest scripts"
+          echo "Pipeline    -- Step Functions triggered"
           echo "================================================"
