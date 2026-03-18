@@ -114,7 +114,8 @@ jobs:
                 "Name": "glueetl",
                 "ScriptLocation": "s3://marketflow-property-intelligence-data/glue-scripts/etl_job.py",
                 "PythonVersion": "3"
-              }
+              },
+              "Role": "AWSGlueServiceRole-MarketFlow"
             }'
           echo "Glue ETL job updated with latest script"
 
@@ -127,6 +128,19 @@ jobs:
                 "Name": "glueetl",
                 "ScriptLocation": "s3://marketflow-property-intelligence-data/glue-scripts/data_quality_check.py",
                 "PythonVersion": "3"
-              }
+              },
+              "Role": "AWSGlueServiceRole-MarketFlow"
             }'
-          echo "Glue Data Q
+          echo "Glue Data Quality job updated with latest script"
+
+      # ── Step 4: Deployment summary ─────────────────────────────
+      - name: Deployment summary
+        run: |
+          echo "================================================"
+          echo "Deployment complete -- ${{ env.ENVIRONMENT }}"
+          echo "================================================"
+          echo "Data files  -- synced to S3"
+          echo "ETL script  -- s3://.../glue-scripts/etl_job.py"
+          echo "DQ script   -- s3://.../glue-scripts/data_quality_check.py"
+          echo "Glue jobs   -- updated with latest scripts"
+          echo "================================================"
