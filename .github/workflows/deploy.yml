@@ -1,19 +1,55 @@
-name: Deploy to AWS
+name: MarketFlow CI/CD Pipeline
 
 on:
   push:
     branches: [main, dev, staging]
+  pull_request:
+    branches: [main, staging]
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  deploy:
+  # ── JOB 1: CI -- runs on every push and every PR ──────────────
+  ci:
+    name: Continuous Integration
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pytest boto3 pandas pyarrow
+
+      - name: Check Glue scripts are valid Python
+        run: |
+          python -m py_compile glue_jobs/etl_job.py
+          echo "etl_job.py -- syntax OK"
+          python -m py_compile glue_jobs/data_quality_check.py
+          echo "data_quality_check.py -- syntax OK"
+
+      - name: Check data files exist
+        run: |
+          if [ -d "data" ]; then
+            echo "data/ folder found"
+            find data/ -name "*.csv" | head -20
+          else
+            echo "No data/ folder -- skipping"
+          fi
+
+  # ── JOB 2: CD -- only runs after CI passes ────────────────────
+  cd:
+    name: Continuous Deployment
+    runs-on: ubuntu-latest
+    needs: ci
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -24,19 +60,73 @@ jobs:
       - name: Verify AWS connection
         run: aws sts get-caller-identity
 
+      - name: Set environment based on branch
+        run: |
+          if   [ "$GITHUB_REF" == "refs/heads/main" ];    then
+            echo "ENVIRONMENT=production" >> $GITHUB_ENV
+          elif [ "$GITHUB_REF" == "refs/heads/staging" ]; then
+            echo "ENVIRONMENT=staging"    >> $GITHUB_ENV
+          else
+            echo "ENVIRONMENT=dev"        >> $GITHUB_ENV
+          fi
+
+      # ── Step 1: Sync data files to S3 ─────────────────────────
       - name: Sync data files to S3
         run: |
-          for source in cbre-living cushman-wakefield foxtons hamptons jll-residential knight-frank purple-bricks right-move savills strutt-parker; do
+          echo "Deploying to ${{ env.ENVIRONMENT }} environment"
+          for source in cbre-living cushman-wakefield foxtons hamptons \
+            jll-residential knight-frank purple-bricks right-move \
+            savills strutt-parker; do
             if [ -d "data/$source" ]; then
-              aws s3 sync data/$source/ s3://marketflow-property-intelligence-data/$source/raw-data/ \
+              aws s3 sync data/$source/ \
+                s3://marketflow-property-intelligence-data/$source/raw-data/ \
                 --exclude "*" \
                 --include "*.csv" \
                 --include "*.json" \
                 --include "*.parquet" \
                 --include "*.xlsx" \
-                --delete
-              echo "✓ Synced $source to S3"
+                --delete \
+                --metadata environment=${{ env.ENVIRONMENT }}
+              echo "Synced $source to S3 [${{ env.ENVIRONMENT }}]"
             else
-              echo "⚠ Skipped $source — folder not found in repo"
+              echo "Skipped $source -- no data folder found"
             fi
           done
+
+      # ── Step 2: Upload Glue scripts to S3 ─────────────────────
+      - name: Upload Glue scripts to S3
+        run: |
+          aws s3 cp glue_jobs/etl_job.py \
+            s3://marketflow-property-intelligence-data/glue-scripts/etl_job.py
+          echo "etl_job.py uploaded to S3"
+
+          aws s3 cp glue_jobs/data_quality_check.py \
+            s3://marketflow-property-intelligence-data/glue-scripts/data_quality_check.py
+          echo "data_quality_check.py uploaded to S3"
+
+      # ── Step 3: Update Glue jobs with latest scripts ───────────
+      - name: Update Glue ETL job
+        run: |
+          aws glue update-job \
+            --job-name marketflow-glue-etl-job \
+            --job-update '{
+              "Command": {
+                "Name": "glueetl",
+                "ScriptLocation": "s3://marketflow-property-intelligence-data/glue-scripts/etl_job.py",
+                "PythonVersion": "3"
+              }
+            }'
+          echo "Glue ETL job updated with latest script"
+
+      - name: Update Glue Data Quality job
+        run: |
+          aws glue update-job \
+            --job-name marketflow-data-quality-check \
+            --job-update '{
+              "Command": {
+                "Name": "glueetl",
+                "ScriptLocation": "s3://marketflow-property-intelligence-data/glue-scripts/data_quality_check.py",
+                "PythonVersion": "3"
+              }
+            }'
+          echo "Glue Data Q
