@@ -1,7 +1,4 @@
 # MarketFlow Property Intelligence
-## AWS Data Engineering Pipeline
-
----
 
 ## Overview
 
