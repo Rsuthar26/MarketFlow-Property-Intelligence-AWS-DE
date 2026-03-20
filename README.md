@@ -1,9 +1,6 @@
 # MarketFlow Property Intelligence
 ## AWS Data Engineering Pipeline
 
-**London Success Academy — Data-SPARK Mentorship | Week 2: Pipeline Orchestration**
-**Mentor: Venkat Potamsetti**
-
 ---
 
 ## Overview
